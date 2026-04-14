@@ -1,0 +1,13 @@
+{
+  "name": "core-network-compliance-monorepo",
+  "private": true,
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "dev:frontend": "pnpm --dir apps/frontend dev",
+    "build:frontend": "pnpm --dir apps/frontend build",
+    "lint:frontend": "pnpm --dir apps/frontend lint",
+    "test:frontend": "pnpm --dir apps/frontend test",
+    "contracts:sync": "echo \"Backend OpenAPI is the source of truth. Generate contracts into packages/api-contracts during implementation.\""
+  }
+}
+

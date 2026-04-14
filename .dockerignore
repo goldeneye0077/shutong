@@ -1,0 +1,13 @@
+node_modules
+apps/*/node_modules
+apps/*/dist
+apps/*/.pytest_cache
+apps/*/__pycache__
+packages/*/node_modules
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+tmp
+output
+*.zip
