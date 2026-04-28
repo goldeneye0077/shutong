@@ -6,6 +6,7 @@ from jose import JWTError
 from sqlalchemy.orm import Session
 
 from app.core.security import decode_token
+from app.core.permissions import has_any_permission
 from app.db.session import get_db
 from app.models.entities import User
 
@@ -18,7 +19,7 @@ def get_current_user(
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
+        detail="登录状态已失效，请重新登录。",
     )
     try:
         payload = decode_token(token, expected_type="access")
@@ -40,9 +41,20 @@ def require_roles(*allowed_roles: str):
         if current_user.role is None or current_user.role.name not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You do not have permission to perform this action.",
+                detail="没有权限执行此操作。",
             )
         return current_user
 
     return dependency
 
+
+def require_permissions(*required_permissions: str):
+    def dependency(current_user: User = Depends(get_current_user)) -> User:
+        if current_user.role is None or not has_any_permission(current_user, required_permissions):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="没有权限执行此操作。",
+            )
+        return current_user
+
+    return dependency

@@ -1,29 +1,109 @@
 import { useQuery } from "@tanstack/react-query";
-import Alert from "antd/es/alert";
-import Col from "antd/es/col";
-import Row from "antd/es/row";
-import Space from "antd/es/space";
-import Table from "antd/es/table";
-import Tag from "antd/es/tag";
-import Typography from "antd/es/typography";
-import type { ColumnsType } from "antd/es/table";
+import {
+  IconApps,
+  IconBranch,
+  IconExclamationCircle,
+  IconFile,
+} from "@arco-design/web-react/icon";
+import { Alert, Empty, Space, Tag, Typography } from "@arco-design/web-react";
 import { useAuth } from "../app/auth";
 import { getActiveRefetchInterval } from "../app/polling";
 import {
+  CommandMetric,
   KeyValueList,
   LoadingBlock,
-  PageHeader,
+  OperatorPanel,
   QueryErrorNotice,
-  SectionTitle,
+  SeverityTag,
   StatusTag,
   formatDateTime,
-  panelStyle,
+  translateAuditAction,
   translateReportType,
+  translateSeverity,
   translateResourceType,
 } from "../app/ui";
-import { getSystemSummary, listAssets, listFindings, listInspections, listReports } from "../services/api";
-import type { InspectionRun, ReportJob } from "../types/api";
+import {
+  getDashboardMetrics,
+  getSystemSummary,
+  listAssets,
+  listAuditEvents,
+  listFindings,
+  listInspections,
+  listReports,
+} from "../services/api";
+import type { AuditEvent, Finding, InspectionRun, ReportJob } from "../types/api";
 import type { ThemeMode } from "../theme/theme";
+
+const pressureLabels = ["对象", "巡检", "风险", "报告", "审计"];
+
+function severityRank(value: string) {
+  const rank: Record<string, number> = {
+    critical: 4,
+    high: 3,
+    medium: 2,
+    low: 1,
+  };
+
+  return rank[value] ?? 0;
+}
+
+function buildPressureValues({
+  assetCount,
+  activeInspections,
+  openFindings,
+  pendingReports,
+  auditCount,
+}: {
+  assetCount: number;
+  activeInspections: number;
+  openFindings: number;
+  pendingReports: number;
+  auditCount: number;
+}) {
+  return [
+    Math.max(assetCount * 8, assetCount ? 24 : 0),
+    Math.max(activeInspections * 28, activeInspections ? 36 : 0),
+    Math.max(openFindings * 18, openFindings ? 32 : 0),
+    Math.max(pendingReports * 22, pendingReports ? 30 : 0),
+    Math.max(auditCount * 4, auditCount ? 18 : 0),
+  ];
+}
+
+function buildLinePath(values: number[]) {
+  const width = 720;
+  const height = 270;
+  const left = 46;
+  const bottom = 214;
+  const chartWidth = width - left * 2;
+  const chartHeight = 154;
+  const maxValue = Math.max(...values, 1);
+
+  const points = values.map((value, index) => {
+    const x = left + (chartWidth / Math.max(values.length - 1, 1)) * index;
+    const y = bottom - (value / maxValue) * chartHeight;
+    return { x, y };
+  });
+
+  const line = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+  const lastPoint = points[points.length - 1] ?? { x: width - left, y: bottom };
+  const firstPoint = points[0] ?? { x: left, y: bottom };
+  const area = `${line} L ${lastPoint.x} ${bottom} L ${firstPoint.x} ${bottom} Z`;
+
+  return { area, line, maxValue, bottom };
+}
+
+function createActivity(event: AuditEvent) {
+  return {
+    id: event.id,
+    title: `${translateResourceType(event.resource_type)} / ${translateAuditAction(event.action)}`,
+    description: `资源 ${event.resource_id.slice(0, 8)} · ${formatDateTime(event.created_at)}`,
+    time: formatDateTime(event.created_at),
+  };
+}
+
+function getRiskTitle(finding: Finding) {
+  return finding.title || `${translateSeverity(finding.severity)}风险`;
+}
 
 export function DashboardPage({ mode }: { mode: ThemeMode }) {
   const { accessToken, user } = useAuth();
@@ -31,6 +111,11 @@ export function DashboardPage({ mode }: { mode: ThemeMode }) {
   const summaryQuery = useQuery({
     queryKey: ["system-summary", accessToken],
     queryFn: () => getSystemSummary(accessToken),
+  });
+  const dashboardMetricsQuery = useQuery({
+    queryKey: ["dashboard-metrics", accessToken],
+    queryFn: () => getDashboardMetrics(accessToken!),
+    enabled: Boolean(accessToken),
   });
   const assetsQuery = useQuery({
     queryKey: ["assets", accessToken],
@@ -58,251 +143,295 @@ export function DashboardPage({ mode }: { mode: ThemeMode }) {
     refetchInterval: (query) =>
       getActiveRefetchInterval((((query.state.data as ReportJob[] | undefined) ?? []).map((item) => item.status))),
   });
+  const auditQuery = useQuery({
+    queryKey: ["audit-events", accessToken, "dashboard"],
+    queryFn: () => listAuditEvents(accessToken!),
+    enabled: Boolean(accessToken),
+  });
 
+  const assetCount = assetsQuery.data?.total ?? 0;
   const inspectionItems = inspectionsQuery.data?.items ?? [];
-  const reportItems = reportsQuery.data ?? [];
   const findingItems = findingsQuery.data?.items ?? [];
-  const pendingInspections = inspectionItems.filter((item) => item.status === "queued" || item.status === "processing").length;
-  const pendingReports = reportItems.filter((item) => item.status === "queued" || item.status === "processing").length;
+  const reportItems = reportsQuery.data ?? [];
+  const auditItems = auditQuery.data?.items ?? [];
+  const dashboardMetrics = dashboardMetricsQuery.data;
+  const activityItems = auditItems.slice(0, 5).map(createActivity);
+
+  const activeInspections = inspectionItems.filter((item) => item.status === "queued" || item.status === "processing").length;
   const openFindings = findingItems.filter((item) => item.status === "open" || item.status === "pending").length;
-  const closedFindings = findingItems.filter((item) => item.status === "closed").length;
+  const severeFindings = findingItems.filter(
+    (item) => (item.status === "open" || item.status === "pending") && ["critical", "high"].includes(item.severity),
+  ).length;
+  const pendingReports = reportItems.filter((item) => item.status === "queued" || item.status === "processing").length;
+  const pressureValues = buildPressureValues({
+    assetCount,
+    activeInspections,
+    openFindings,
+    pendingReports,
+    auditCount: auditItems.length,
+  });
+  const pressureChart = buildLinePath(pressureValues);
 
-  const recentInspectionColumns: ColumnsType<InspectionRun> = [
-    { title: "巡检任务", dataIndex: "name", key: "name" },
-    { title: "状态", key: "status", render: (_, record) => <StatusTag value={record.status} /> },
-    { title: "对象数量", key: "assets", render: (_, record) => record.asset_scope.length },
-    { title: "更新时间", dataIndex: "updated_at", key: "updated_at", render: formatDateTime },
-  ];
+  const pendingQueue = [
+    ...inspectionItems
+      .filter((item) => item.status === "queued" || item.status === "processing")
+      .map((item) => ({
+        id: `inspection-${item.id}`,
+        title: item.name,
+        meta: `${item.asset_scope.length} 个对象 · 巡检`,
+        status: item.status,
+        updatedAt: item.updated_at,
+      })),
+    ...reportItems
+      .filter((item) => item.status === "queued" || item.status === "processing")
+      .map((item) => ({
+        id: `report-${item.id}`,
+        title: translateReportType(item.report_type),
+        meta: "报告生成",
+        status: item.status,
+        updatedAt: item.updated_at,
+      })),
+  ].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 
-  const recentReportColumns: ColumnsType<ReportJob> = [
-    { title: "报告类型", dataIndex: "report_type", key: "report_type", render: translateReportType },
-    { title: "状态", key: "status", render: (_, record) => <StatusTag value={record.status} /> },
-    { title: "完成时间", dataIndex: "completed_at", key: "completed_at", render: formatDateTime },
-  ];
+  const riskBacklog = findingItems
+    .filter((item) => item.status === "open" || item.status === "pending")
+    .sort((a, b) => severityRank(b.severity) - severityRank(a.severity))
+    .slice(0, 5);
 
   return (
     <Space direction="vertical" size="large" style={{ width: "100%" }}>
-      <section style={panelStyle(mode)}>
-        <PageHeader
-          eyebrow="Ops Command"
-          title="核心网配置安全合规态势总览"
-          description="把值守最关心的运行面、执行面和风险面压缩到同一个工作区里。你先看到的是信号和状态，再往下才是表格和明细。"
-          actions={
-            <Space size={[8, 8]} wrap>
-              <Tag color="cyan">{user?.username ?? "当前用户"}</Tag>
-              <Tag color={user?.is_active ? "green" : "red"}>{user?.is_active ? "账号启用" : "账号停用"}</Tag>
-            </Space>
-          }
-          metrics={[
-            {
-              label: "治理对象",
-              value: assetsQuery.data?.total ?? 0,
-              hint: "已纳入当前平台的治理对象总量",
-              tone: "accent",
-            },
-            {
-              label: "活动巡检",
-              value: pendingInspections,
-              hint: "排队中与处理中任务",
-              tone: pendingInspections > 0 ? "warning" : "default",
-            },
-            {
-              label: "待处置问题",
-              value: openFindings,
-              hint: "仍需分派、处理或复核的发现项",
-              tone: openFindings > 0 ? "warning" : "success",
-            },
-            {
-              label: "报告队列",
-              value: pendingReports,
-              hint: "仍在生成链路中的报告任务",
-            },
-          ]}
-        />
+      <section className="shell-command-hero">
+        <div className="shell-command-hero-copy">
+          <span className="shell-overline">值守驾驶舱</span>
+          <Typography.Title heading={2}>值守总览</Typography.Title>
+          <p>{user?.full_name || user?.username || "管理员"}，当前页面只展示可操作状态：队列、风险、报告和审计。</p>
+        </div>
+        <div className="shell-command-hero-status">
+          <span className="shell-live-dot" />
+          <div>
+            <strong>三域链路在线</strong>
+            <span>前端调用后端；数据服务仅消费任务队列。</span>
+          </div>
+        </div>
       </section>
 
-      <Row gutter={[24, 24]}>
-        <Col xs={24} xl={15}>
-          <section style={panelStyle(mode)}>
-            <SectionTitle
-              title="实时指挥盘"
-              subtitle="不靠大而空的炫光背景，而是用更清楚的数值和短句把当前值守态势说透。"
-            />
-            <div className="shell-telemetry-grid">
-              <div className="shell-telemetry-card">
-                <h4>值守脉冲</h4>
-                <div className="shell-data-stack">
-                  <div className="shell-data-strip">
-                    <span>解析对象总量</span>
-                    <strong>{assetsQuery.data?.total ?? 0}</strong>
-                  </div>
-                  <div className="shell-data-strip">
-                    <span>在途巡检任务</span>
-                    <strong>{pendingInspections}</strong>
-                  </div>
-                  <div className="shell-data-strip">
-                    <span>待生成报告</span>
-                    <strong>{pendingReports}</strong>
-                  </div>
-                  <div className="shell-data-strip">
-                    <span>已闭环问题</span>
-                    <strong>{closedFindings}</strong>
-                  </div>
-                </div>
-              </div>
+      <div className="shell-command-metric-grid">
+        <CommandMetric
+          label="治理对象"
+          value={dashboardMetrics?.coverage.asset_total ?? assetCount}
+          meta={`覆盖率 ${dashboardMetrics?.coverage.coverage_rate ?? 0}%`}
+          tone="cyan"
+          signal={<IconApps />}
+        />
+        <CommandMetric
+          label="整改率"
+          value={`${dashboardMetrics?.rectification.rectification_rate ?? 100}%`}
+          meta={`${dashboardMetrics?.rectification.pending_ticket_reviews ?? 0} 个待复核`}
+          tone="blue"
+          signal={<IconBranch />}
+        />
+        <CommandMetric
+          label="待处理风险"
+          value={dashboardMetrics?.rectification.open_findings ?? openFindings}
+          meta={`${dashboardMetrics?.alerts.high_open_findings ?? severeFindings} 个高危以上`}
+          tone={severeFindings > 0 ? "red" : "amber"}
+          signal={<IconExclamationCircle />}
+        />
+        <CommandMetric
+          label="试点节省"
+          value={`${dashboardMetrics?.pilot_effect.estimated_saved_minutes ?? 0} 分钟`}
+          meta={`${dashboardMetrics?.pilot_effect.efficiency_uplift_percent ?? 0}% 效率提升估算`}
+          tone="amber"
+          signal={<IconFile />}
+        />
+      </div>
 
-              <div className="shell-telemetry-card">
-                <h4>执行链路</h4>
-                <div className="shell-signal-list">
-                  <div className="shell-signal-item">
-                    <span className="shell-live-dot" />
-                    <div>
-                      <strong>配置采集与解析</strong>
-                      <span>前台上传后写入 backend 元数据，再由 data-service 领取任务并回写标准化结果。</span>
-                    </div>
-                  </div>
-                  <div className="shell-signal-item">
-                    <span className="shell-live-dot" />
-                    <div>
-                      <strong>规则执行与问题回写</strong>
-                      <span>巡检任务进入 worker 后执行规则集，命中结果与发现项回写到统一查询面。</span>
-                    </div>
-                  </div>
-                  <div className="shell-signal-item">
-                    <span className="shell-live-dot" />
-                    <div>
-                      <strong>报告与 AI 草稿</strong>
-                      <span>报告产物与 AI 摘要都由服务侧生成，前台只展示状态、内容和人工复核入口。</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+      <div className="shell-duty-grid">
+        <OperatorPanel
+          title="当前压力模型"
+          subtitle="由当前对象、执行队列、待处理风险、报告队列和审计事件计算，仅用于值守排序。"
+          aside={<Tag color={mode === "dark" ? "cyan" : "blue"}>实时查询</Tag>}
+        >
+          <div className="shell-pressure-chart">
+            <svg viewBox="0 0 720 270" className="shell-growth-chart-svg" role="img" aria-label="当前压力模型">
+              <defs>
+                <linearGradient id="pressureAreaGradient" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor="rgba(42, 168, 255, 0.34)" />
+                  <stop offset="68%" stopColor="rgba(32, 215, 255, 0.12)" />
+                  <stop offset="100%" stopColor="rgba(23, 105, 255, 0.02)" />
+                </linearGradient>
+              </defs>
+
+              {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
+                const y = pressureChart.bottom - 154 * ratio;
+                const value = Math.round(pressureChart.maxValue * ratio);
+                return (
+                  <g key={ratio}>
+                    <line x1="46" x2="674" y1={y} y2={y} stroke="rgba(139, 170, 204, 0.16)" strokeDasharray="4 10" />
+                    <text x="4" y={y + 5} className="shell-growth-chart-axis">
+                      {value}
+                    </text>
+                  </g>
+                );
+              })}
+
+              <path d={pressureChart.area} fill="url(#pressureAreaGradient)" />
+              <path d={pressureChart.line} fill="none" stroke="var(--shell-accent)" strokeWidth="3.5" strokeLinecap="round" />
+            </svg>
+            <div className="shell-growth-chart-months">
+              {pressureLabels.map((label) => (
+                <span key={label}>{label}</span>
+              ))}
             </div>
-          </section>
-        </Col>
+          </div>
+        </OperatorPanel>
 
-        <Col xs={24} xl={9}>
-          <section style={panelStyle(mode)}>
-            <SectionTitle
-              title="系统边界"
-              subtitle="科技风只负责让工作台更有秩序感，不改变三域职责边界。"
-            />
-            {summaryQuery.isLoading ? (
-              <LoadingBlock label="正在加载系统摘要" />
-            ) : summaryQuery.error ? (
-              <QueryErrorNotice error={summaryQuery.error} />
-            ) : (
-              <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-                <Alert type="success" showIcon message="Frontend" description={summaryQuery.data?.frontend_boundary} />
-                <Alert type="info" showIcon message="Backend" description={summaryQuery.data?.backend_boundary} />
-                <Alert type="warning" showIcon message="Data-Service" description={summaryQuery.data?.data_service_boundary} />
-                <div>
-                  <Typography.Text strong>公开资源</Typography.Text>
-                  <div style={{ marginTop: 12 }}>
-                    <Space size={[8, 8]} wrap>
-                      {(summaryQuery.data?.public_resources ?? []).map((item) => (
-                        <Tag key={item}>{translateResourceType(item)}</Tag>
-                      ))}
-                    </Space>
+        <OperatorPanel title="最近审计事件" subtitle="只展示系统真实事件，不补演示动态。">
+          {auditQuery.isLoading ? (
+            <LoadingBlock label="正在读取审计事件" />
+          ) : auditQuery.error ? (
+            <QueryErrorNotice error={auditQuery.error} />
+          ) : activityItems.length > 0 ? (
+            <div className="shell-activity-list">
+              {activityItems.map((item) => (
+                <div key={item.id} className="shell-activity-item">
+                  <span className="shell-activity-bullet" />
+                  <div>
+                    <strong>{item.title}</strong>
+                    <span>{item.description}</span>
+                    <small className="shell-activity-time">{item.time}</small>
                   </div>
                 </div>
-              </Space>
-            )}
-          </section>
-        </Col>
-      </Row>
+              ))}
+            </div>
+          ) : (
+            <Empty description="暂无审计事件" />
+          )}
+        </OperatorPanel>
+      </div>
 
-      <Row gutter={[24, 24]}>
-        <Col xs={24} xl={14}>
-          <section style={panelStyle(mode)}>
-            <SectionTitle title="最近巡检" subtitle="优先盯住仍在运行或刚结束的任务，及时接住状态回写与问题分派。" />
-            {inspectionsQuery.isLoading ? (
-              <LoadingBlock label="正在加载巡检记录" />
-            ) : inspectionsQuery.error ? (
-              <QueryErrorNotice error={inspectionsQuery.error} />
-            ) : (
-              <Table
-                rowKey="id"
-                columns={recentInspectionColumns}
-                dataSource={inspectionItems}
-                pagination={false}
-                size="small"
-              />
-            )}
-          </section>
-        </Col>
+      <div className="shell-duty-grid shell-duty-grid-balanced">
+        <OperatorPanel title="任务队列" subtitle="巡检和报告的后台处理状态。">
+          <div className="shell-data-stack">
+            {pendingQueue.slice(0, 5).map((item) => (
+              <div key={item.id} className="shell-data-strip">
+                <div>
+                  <strong>{item.title}</strong>
+                  <span>{item.meta}</span>
+                </div>
+                <div className="shell-data-strip-tail">
+                  <StatusTag value={item.status} />
+                  <small>{formatDateTime(item.updatedAt)}</small>
+                </div>
+              </div>
+            ))}
+            {pendingQueue.length === 0 ? (
+              <div className="shell-empty-state">当前没有排队或处理中的巡检、报告任务。</div>
+            ) : null}
+          </div>
+        </OperatorPanel>
 
-        <Col xs={24} xl={10}>
-          <section style={panelStyle(mode)}>
-            <SectionTitle title="报告队列" subtitle="报告生成仍由 data-service 完成，这里专注于看状态和拿产物。" />
-            {reportsQuery.isLoading ? (
-              <LoadingBlock label="正在加载报告任务" />
-            ) : reportsQuery.error ? (
-              <QueryErrorNotice error={reportsQuery.error} />
-            ) : (
-              <Table
-                rowKey="id"
-                columns={recentReportColumns}
-                dataSource={reportItems}
-                pagination={false}
-                size="small"
-              />
-            )}
-          </section>
-        </Col>
-      </Row>
+        <OperatorPanel title="待办处置" subtitle="优先展示高风险与未关闭发现。">
+          <div className="shell-data-stack">
+            {riskBacklog.map((item) => (
+              <div key={item.id} className="shell-data-strip">
+                <div>
+                  <strong>{getRiskTitle(item)}</strong>
+                  <span>{item.asset_id ? `对象 ${item.asset_id.slice(0, 8)}` : "未绑定对象"}</span>
+                </div>
+                <div className="shell-data-strip-tail">
+                  <SeverityTag value={item.severity} />
+                  <StatusTag value={item.status} />
+                </div>
+              </div>
+            ))}
+            {riskBacklog.length === 0 ? <div className="shell-empty-state">当前没有待处理风险。</div> : null}
+          </div>
+        </OperatorPanel>
+      </div>
 
-      <Row gutter={[24, 24]}>
-        <Col xs={24} xl={10}>
-          <section style={panelStyle(mode)}>
-            <SectionTitle
-              title="值守透视"
-              subtitle="把值班同学最可能需要抬头确认的关键统计放到最后一屏，减少来回切换。"
-            />
+      <div className="shell-duty-grid shell-duty-grid-balanced">
+        <OperatorPanel title="验收指标" subtitle="按需求口径聚合覆盖率、整改率和试点效果。">
+          {dashboardMetricsQuery.isLoading ? (
+            <LoadingBlock label="正在计算验收指标" />
+          ) : dashboardMetricsQuery.error ? (
+            <QueryErrorNotice error={dashboardMetricsQuery.error} />
+          ) : (
             <KeyValueList
               items={[
-                { label: "发现项总量", value: findingsQuery.data?.total ?? 0 },
-                { label: "待处置问题", value: openFindings },
-                { label: "已关闭问题", value: closedFindings },
-                { label: "最近巡检更新时间", value: formatDateTime(inspectionItems[0]?.updated_at) },
-                { label: "最近报告完成时间", value: formatDateTime(reportItems[0]?.completed_at) },
+                {
+                  label: "配置覆盖率",
+                  value: `${dashboardMetrics?.coverage.configured_assets ?? 0}/${dashboardMetrics?.coverage.asset_total ?? 0}，${dashboardMetrics?.coverage.coverage_rate ?? 0}%`,
+                },
+                {
+                  label: "整改完成率",
+                  value: `${dashboardMetrics?.rectification.closed_findings ?? 0}/${dashboardMetrics?.rectification.finding_total ?? 0}，${dashboardMetrics?.rectification.rectification_rate ?? 100}%`,
+                },
+                {
+                  label: "待复核工单",
+                  value: `${dashboardMetrics?.rectification.pending_ticket_reviews ?? 0} 个`,
+                },
+                {
+                  label: "估算节省时长",
+                  value: `${dashboardMetrics?.pilot_effect.estimated_saved_minutes ?? 0} 分钟`,
+                },
               ]}
             />
-          </section>
-        </Col>
+          )}
+        </OperatorPanel>
 
-        <Col xs={24} xl={14}>
-          <section style={panelStyle(mode)}>
-            <SectionTitle
-              title="当前值守提示"
-              subtitle="这里不讲空泛口号，只保留和操作决策直接有关的短提示。"
-            />
-            <div className="shell-signal-list">
-              <div className="shell-signal-item">
-                <span className="shell-live-dot" />
-                <div>
-                  <strong>优先处理仍在运行的巡检任务</strong>
-                  <span>当前共有 {pendingInspections} 个任务处于排队或处理中，建议先确认输入对象和规则集是否符合预期。</span>
+        <OperatorPanel title="风险热点" subtitle="按对象类型和风险等级聚合，优先展示问题高发区域。">
+          {dashboardMetricsQuery.isLoading ? (
+            <LoadingBlock label="正在计算风险热点" />
+          ) : dashboardMetricsQuery.error ? (
+            <QueryErrorNotice error={dashboardMetricsQuery.error} />
+          ) : dashboardMetrics?.risk_hotspots.length ? (
+            <div className="shell-data-stack">
+              {dashboardMetrics.risk_hotspots.map((hotspot) => (
+                <div key={`${hotspot.asset_type}-${hotspot.severity}`} className="shell-data-strip">
+                  <div>
+                    <strong>{hotspot.asset_type}</strong>
+                    <span>{hotspot.count} 条问题</span>
+                  </div>
+                  <div className="shell-data-strip-tail">
+                    <SeverityTag value={hotspot.severity} />
+                  </div>
                 </div>
-              </div>
-              <div className="shell-signal-item">
-                <span className="shell-live-dot" />
-                <div>
-                  <strong>问题闭环压力集中在待处置项</strong>
-                  <span>当前共有 {openFindings} 个问题尚未关闭，适合从闭环处置页继续建单、推进和复核。</span>
-                </div>
-              </div>
-              <div className="shell-signal-item">
-                <span className="shell-live-dot" />
-                <div>
-                  <strong>所有 AI 草稿都保持人工确认</strong>
-                  <span>即使摘要已经生成，也不会直接作为正式结论发布，流程上仍然要求人工复核。</span>
-                </div>
-              </div>
+              ))}
             </div>
-          </section>
-        </Col>
-      </Row>
+          ) : (
+            <div className="shell-empty-state">当前没有可聚合的风险热点。</div>
+          )}
+        </OperatorPanel>
+      </div>
+
+      <div className="shell-duty-grid shell-duty-grid-balanced">
+        <OperatorPanel title="平台边界" subtitle="三域职责保持清晰，前端不直接访问数据服务。">
+          {summaryQuery.isLoading ? (
+            <LoadingBlock label="正在读取系统边界" />
+          ) : summaryQuery.error ? (
+            <QueryErrorNotice error={summaryQuery.error} />
+          ) : (
+            <Space direction="vertical" size="medium" style={{ width: "100%" }}>
+              <Alert type="success" showIcon title="前端" content={summaryQuery.data?.frontend_boundary} />
+              <Alert type="info" showIcon title="后端" content={summaryQuery.data?.backend_boundary} />
+              <Alert type="warning" showIcon title="数据服务" content={summaryQuery.data?.data_service_boundary} />
+            </Space>
+          )}
+        </OperatorPanel>
+
+        <OperatorPanel title="值守摘要" subtitle="帮助操作员快速判断下一步。">
+          <KeyValueList
+            items={[
+              { label: "活动巡检", value: `${activeInspections} 个` },
+              { label: "待处理风险", value: `${openFindings} 个` },
+              { label: "高危以上风险", value: `${severeFindings} 个` },
+              { label: "报告生成中", value: `${pendingReports} 个` },
+              { label: "最近任务更新", value: formatDateTime(inspectionItems[0]?.updated_at ?? reportItems[0]?.updated_at) },
+            ]}
+          />
+        </OperatorPanel>
+      </div>
     </Space>
   );
 }

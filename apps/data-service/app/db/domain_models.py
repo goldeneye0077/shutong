@@ -44,6 +44,17 @@ class RuleSet(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     definition: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
+class RuleSetVersion(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "rule_set_versions"
+
+    rule_set_id: Mapped[str] = mapped_column(ForeignKey("rule_sets.id"), nullable=False)
+    version: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="draft")
+    snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_by_id: Mapped[str | None] = mapped_column(String(36))
+
+
 class InspectionRun(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "inspection_runs"
 
@@ -77,6 +88,11 @@ class Ticket(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(50), default="open")
     due_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     resolution_note: Mapped[str | None] = mapped_column(Text)
+    review_status: Mapped[str] = mapped_column(String(50), default="not_submitted")
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_by_id: Mapped[str | None] = mapped_column(String(36))
+    review_comment: Mapped[str | None] = mapped_column(Text)
 
 
 class ExceptionRequest(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -171,3 +187,80 @@ class AuditEvent(UUIDPrimaryKeyMixin, Base):
     resource_id: Mapped[str] = mapped_column(String(36), nullable=False)
     details: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+
+
+class LedgerItem(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "ledger_items"
+
+    catalog_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="active")
+    source: Mapped[str] = mapped_column(String(50), default="manual")
+    version: Mapped[str] = mapped_column(String(50), default="v1")
+    owner: Mapped[str | None] = mapped_column(String(100))
+    content: Mapped[dict] = mapped_column(JSON, default=dict)
+    imported_by_id: Mapped[str | None] = mapped_column(String(36))
+
+
+class ScheduledTask(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "scheduled_tasks"
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    task_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    interval_minutes: Mapped[int] = mapped_column(Integer, default=1440)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_message: Mapped[str | None] = mapped_column(Text)
+    created_by_id: Mapped[str | None] = mapped_column(String(36))
+
+
+class Notification(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "notifications"
+
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    level: Mapped[str] = mapped_column(String(30), default="info")
+    status: Mapped[str] = mapped_column(String(30), default="unread")
+    resource_type: Mapped[str | None] = mapped_column(String(100))
+    resource_id: Mapped[str | None] = mapped_column(String(36))
+    recipient_user_id: Mapped[str | None] = mapped_column(String(36))
+    created_by_id: Mapped[str | None] = mapped_column(String(36))
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LogClue(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "log_clues"
+
+    source: Mapped[str] = mapped_column(String(100), nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    keyword: Mapped[str] = mapped_column(String(120), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    event_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resource_type: Mapped[str | None] = mapped_column(String(100))
+    resource_id: Mapped[str | None] = mapped_column(String(36))
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+    imported_by_id: Mapped[str | None] = mapped_column(String(36))
+
+
+class ReportTemplate(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "report_templates"
+
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    template_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    version: Mapped[str] = mapped_column(String(50), default="v1")
+    status: Mapped[str] = mapped_column(String(30), default="active")
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    variables: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_by_id: Mapped[str | None] = mapped_column(String(36))
+
+
+class SystemParameter(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    __tablename__ = "system_parameters"
+
+    key: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    value: Mapped[dict] = mapped_column(JSON, default=dict)
+    category: Mapped[str] = mapped_column(String(80), default="general")
+    description: Mapped[str | None] = mapped_column(String(255))
+    updated_by_id: Mapped[str | None] = mapped_column(String(36))

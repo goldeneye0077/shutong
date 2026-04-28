@@ -11,9 +11,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@ant-design/icons": "^5.5.0",
+    "@arco-design/web-react": "^2.66.14",
+    "@shutong/api-contracts": "workspace:*",
     "@tanstack/react-query": "^5.66.0",
-    "antd": "^5.23.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.1.5"
@@ -27,4 +27,3 @@
     "vitest": "^3.0.5"
   }
 }
-

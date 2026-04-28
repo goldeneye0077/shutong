@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.db.session import get_db, init_database
+from app.jobs.handlers import enqueue_due_scheduled_tasks
 from app.jobs.service import claim_next_job, get_queue_stats
 from app.workers.runner import WorkerRunner
 
@@ -30,7 +31,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="Core Network Compliance Data Service",
+    title="核心网配置合规数据服务",
     version="0.1.0",
     docs_url="/internal/docs",
     openapi_url="/internal/openapi.json",
@@ -64,6 +65,7 @@ async def capabilities() -> dict[str, object]:
             "run_inspection",
             "generate_report",
             "generate_ai_summary",
+            "run_scheduled_task",
         ],
     }
 
@@ -84,3 +86,10 @@ async def claim_next(db: Session = Depends(get_db)) -> dict[str, str | None]:
 @app.post("/internal/queue/run-next", tags=["internal"])
 async def run_next() -> dict[str, object]:
     return await WorkerRunner().run_once()
+
+
+@app.post("/internal/schedules/run-due", tags=["internal"])
+async def run_due_schedules(db: Session = Depends(get_db)) -> dict[str, object]:
+    job_ids = enqueue_due_scheduled_tasks(db)
+    db.commit()
+    return {"status": "queued", "count": len(job_ids), "job_ids": job_ids}

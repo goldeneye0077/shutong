@@ -16,9 +16,8 @@
 
 ## 3. 统一约束
 
-- 技术栈固定：FastAPI、PostgreSQL、React、Vite、Ant Design、Docker Compose
+- 技术栈固定：FastAPI、PostgreSQL、React、Vite、Arco UI、Docker Compose
 - 目录职责固定，禁止将 frontend 业务逻辑写入 backend 或 data-service
 - 所有公共接口必须以 OpenAPI 文档化
 - 所有导出和审批动作必须写审计日志
 - 所有长任务必须通过异步 job_queue 处理
-

@@ -7,7 +7,7 @@
 - Vite
 - React Router
 - TanStack Query
-- Ant Design
+- Arco UI
 
 ## 2. 分层
 
@@ -40,11 +40,11 @@ src/
 - `/workflow`
 - `/reports`
 - `/audit`
+- `/platform`
 
 ## 5. 主题要求
 
 - 浅色与深色主题必须共用同一套 token 入口
 - 首次进入跟随系统主题
 - 用户切换结果持久化到浏览器本地存储
-- 所有页面组件必须通过 Ant Design token 或 CSS variable 读取颜色
-
+- 所有页面组件必须通过 Arco UI 组件能力或 CSS variable 读取颜色

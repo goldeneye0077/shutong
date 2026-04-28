@@ -1,0 +1,13 @@
+hostname mock-e2e-csw-01
+interface GigabitEthernet0/0/1
+ description mock uplink to core
+ ip address 10.10.10.1 255.255.255.0
+ undo shutdown
+interface GigabitEthernet0/0/2
+ description mock downstream access
+ ip address 10.10.20.1 255.255.255.0
+ undo shutdown
+acl number 3000
+ rule 5 permit ip any any
+ rule 10 deny tcp source 10.0.0.0 0.255.255.255 destination 192.168.0.0 0.0.255.255
+return

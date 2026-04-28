@@ -1,6 +1,9 @@
 # API Contracts
 
-This package stores generated frontend contract types derived from the backend OpenAPI schema.
+前端统一从本包读取 API 类型，后端 OpenAPI 是唯一契约源。
 
-The backend API under `/api/v1` is the only contract source for the frontend.
+运行以下命令会导出 `openapi.json` 和 `generated.ts`：
 
+```bash
+pnpm contracts:sync
+```

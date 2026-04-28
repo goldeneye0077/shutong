@@ -6,7 +6,7 @@
 
 ## 全局约束
 
-- 技术栈固定：`frontend=React+Vite+TypeScript+React Router+TanStack Query+Ant Design`，`backend=Python 3.12+FastAPI+PostgreSQL`，`data-service=Python 3.12+FastAPI internal+PostgreSQL worker`，部署为 `Docker Compose`
+- 技术栈固定：`frontend=React+Vite+TypeScript+React Router+TanStack Query+Arco UI`，`backend=Python 3.12+FastAPI+PostgreSQL`，`data-service=Python 3.12+FastAPI internal+PostgreSQL worker`，部署为 `Docker Compose`
 - 仓库为单仓 Monorepo，按 `frontend`、`backend`、`data-service` 三域组织
 - frontend 只调用 backend `/api/v1/*`
 - backend 不执行解析、规则计算和报告生成，只负责公共 API、状态和审计
@@ -37,4 +37,3 @@
 9. 任何 AI 分析结果都必须保留人工确认边界，不能直接发布。
 10. 输出必须包含：实现内容、受影响文件、测试内容、未覆盖风险。
 ```
-

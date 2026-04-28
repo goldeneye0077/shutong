@@ -21,6 +21,22 @@ interface AuthContextValue {
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
 
+function normalizeVisibleUser(user: UserRead): UserRead {
+  if (user.full_name === "Bootstrap Admin") {
+    return { ...user, full_name: "管理员" };
+  }
+  return user;
+}
+
+export function userHasPermission(user: UserRead | null | undefined, permission: string): boolean {
+  const permissions = new Set(user?.permissions ?? []);
+  if (permissions.has("*") || permissions.has(permission)) {
+    return true;
+  }
+  const [resource] = permission.split(":");
+  return permissions.has(`${resource}:*`);
+}
+
 function readStoredAuthState(): StoredAuthState | null {
   if (typeof window === "undefined") {
     return null;
@@ -32,7 +48,12 @@ function readStoredAuthState(): StoredAuthState | null {
   }
 
   try {
-    return JSON.parse(raw) as StoredAuthState;
+    const parsed = JSON.parse(raw) as StoredAuthState;
+    const normalized = { ...parsed, user: normalizeVisibleUser(parsed.user) };
+    if (normalized.user.full_name !== parsed.user.full_name) {
+      window.localStorage.setItem(authStorageKey, JSON.stringify(normalized));
+    }
+    return normalized;
   } catch {
     window.localStorage.removeItem(authStorageKey);
     return null;
@@ -47,7 +68,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const nextState: StoredAuthState = {
       accessToken: bundle.access_token,
       refreshToken: bundle.refresh_token,
-      user: bundle.user
+      user: normalizeVisibleUser(bundle.user),
     };
     setSession(nextState);
     if (typeof window !== "undefined") {

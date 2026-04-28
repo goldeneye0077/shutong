@@ -8,50 +8,43 @@ export default defineConfig({
     port: 5173
   },
   build: {
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
         manualChunks(id) {
           if (!id.includes("node_modules")) {
             return undefined;
           }
+          const normalizedId = id.replace(/\\/g, "/");
 
           if (
-            id.includes("/react/") ||
-            id.includes("\\react\\") ||
-            id.includes("/react-dom/") ||
-            id.includes("\\react-dom\\") ||
-            id.includes("/scheduler/") ||
-            id.includes("\\scheduler\\")
+            normalizedId.includes("/react/") ||
+            normalizedId.includes("/react-dom/") ||
+            normalizedId.includes("/scheduler/")
           ) {
             return "react-core";
           }
 
-          if (id.includes("@tanstack/react-query")) {
+          if (normalizedId.includes("@tanstack/react-query")) {
             return "query";
           }
 
-          if (id.includes("react-router-dom") || id.includes("@remix-run/router")) {
+          if (normalizedId.includes("react-router-dom") || normalizedId.includes("@remix-run/router")) {
             return "router";
           }
 
+          if (normalizedId.includes("@arco-design/web-react/icon")) {
+            return "arco-icons";
+          }
+
           if (
-            id.includes("antd/es/button") ||
-            id.includes("antd/es/form") ||
-            id.includes("antd/es/input") ||
-            id.includes("antd/es/modal") ||
-            id.includes("antd/es/select") ||
-            id.includes("antd/es/message") ||
-            id.includes("rc-field-form") ||
-            id.includes("async-validator") ||
-            id.includes("rc-dialog") ||
-            id.includes("rc-select") ||
-            id.includes("rc-input") ||
-            id.includes("rc-textarea") ||
-            id.includes("rc-motion") ||
-            id.includes("rc-picker") ||
-            id.includes("dayjs")
+            normalizedId.includes("@arco-design/web-react") ||
+            normalizedId.includes("b-validate") ||
+            normalizedId.includes("resize-observer-polyfill") ||
+            normalizedId.includes("react-transition-group") ||
+            normalizedId.includes("dayjs")
           ) {
-            return "antd-actions";
+            return "arco-ui";
           }
 
           return undefined;

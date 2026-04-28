@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app.collectors.mock import collect_base_data
 from app.ai.summarizer import build_summary
 from app.db.domain_models import (
     AiAnalysisJob,
@@ -14,18 +15,21 @@ from app.db.domain_models import (
     ConfigFile,
     Finding,
     InspectionRun,
+    LedgerItem,
+    Notification,
     NormalizedConfig,
     ParseRun,
     ReportArtifact,
     ReportJob,
     RuleRunResult,
     RuleSet,
+    ScheduledTask,
 )
 from app.jobs.models import JobQueue
 from app.jobs.service import enqueue_job
 from app.normalizers.network import build_normalized_config
 from app.parsers.network import parse_config_text
-from app.reports.generator import generate_report_artifact
+from app.reports.generator import generate_report_artifacts
 from app.rules.engine import evaluate_rule
 
 
@@ -35,6 +39,7 @@ def dispatch_job(db: Session, job: JobQueue) -> dict:
         "run_inspection": handle_run_inspection,
         "generate_report": handle_generate_report,
         "generate_ai_summary": handle_generate_ai_summary,
+        "run_scheduled_task": handle_run_scheduled_task,
     }
     handler = handlers.get(job.job_type)
     if not handler:
@@ -79,6 +84,21 @@ def mark_target_failed(db: Session, job: JobQueue, error_message: str) -> None:
             ai_job.status = "failed"
             ai_job.details = {"error": error_message[:2000]}
             db.add(ai_job)
+
+    elif job.job_type == "run_scheduled_task":
+        task = db.get(ScheduledTask, payload.get("scheduled_task_id"))
+        if task:
+            task.last_message = error_message[:1000]
+            db.add(task)
+
+    _create_notification(
+        db,
+        title="后台任务失败",
+        message=f"{job.job_type} 执行失败：{error_message[:300]}",
+        level="error",
+        resource_type="job_queue",
+        resource_id=job.id,
+    )
 
 
 def handle_parse_config(db: Session, job: JobQueue) -> dict:
@@ -229,6 +249,15 @@ def handle_run_inspection(db: Session, job: JobQueue) -> dict:
         resource_id=inspection.id,
         details={"finding_count": finding_count, "asset_scope_size": len(inspection.asset_scope)},
     )
+    if finding_count:
+        _create_notification(
+            db,
+            title="发现待处理风险",
+            message=f"巡检 {inspection.name} 生成 {finding_count} 条问题，请进入闭环处置。",
+            level="warning",
+            resource_type="inspection_run",
+            resource_id=inspection.id,
+        )
     _queue_ai_summary(
         db,
         target_type="inspection_run",
@@ -247,12 +276,22 @@ def handle_generate_report(db: Session, job: JobQueue) -> dict:
     db.add(report_job)
 
     db.execute(delete(ReportArtifact).where(ReportArtifact.report_job_id == report_job.id))
-    artifact_data = generate_report_artifact(db, report_job)
-    artifact = ReportArtifact(report_job_id=report_job.id, **artifact_data)
-    db.add(artifact)
+    artifact_data_list = generate_report_artifacts(
+        db,
+        report_job,
+        template_id=job.payload.get("template_id"),
+        parameters=job.payload.get("parameters") or {},
+    )
+    artifacts = [ReportArtifact(report_job_id=report_job.id, **artifact_data) for artifact_data in artifact_data_list]
+    for artifact in artifacts:
+        db.add(artifact)
+
+    primary_artifact = next((artifact for artifact in artifacts if artifact.artifact_type == "zip"), None)
+    primary_artifact = primary_artifact or next((artifact for artifact in artifacts if artifact.artifact_type == "markdown"), None)
+    primary_artifact = primary_artifact or artifacts[0]
 
     report_job.status = "completed"
-    report_job.file_path = artifact.file_path
+    report_job.file_path = primary_artifact.file_path
     report_job.completed_at = datetime.now(UTC)
     db.add(report_job)
 
@@ -261,7 +300,20 @@ def handle_generate_report(db: Session, job: JobQueue) -> dict:
         action="report.generation.completed",
         resource_type="report_job",
         resource_id=report_job.id,
-        details={"artifact_type": artifact.artifact_type, "file_path": artifact.file_path},
+        details={
+            "artifact_count": len(artifacts),
+            "artifact_types": [artifact.artifact_type for artifact in artifacts],
+            "primary_file_path": primary_artifact.file_path,
+            "template_id": job.payload.get("template_id"),
+        },
+    )
+    _create_notification(
+        db,
+        title="报告产物已生成",
+        message=f"报告任务 {report_job.id} 已完成，生成 {len(artifacts)} 个产物。",
+        level="info",
+        resource_type="report_job",
+        resource_id=report_job.id,
     )
     _queue_ai_summary(
         db,
@@ -269,13 +321,18 @@ def handle_generate_report(db: Session, job: JobQueue) -> dict:
         target_id=report_job.id,
         analysis_type="report_digest",
     )
-    return {"job_type": job.job_type, "report_job_id": report_job.id, "file_path": artifact.file_path}
+    return {
+        "job_type": job.job_type,
+        "report_job_id": report_job.id,
+        "file_path": primary_artifact.file_path,
+        "file_paths": [artifact.file_path for artifact in artifacts],
+    }
 
 
 def handle_generate_ai_summary(db: Session, job: JobQueue) -> dict:
     ai_job = db.get(AiAnalysisJob, job.payload["ai_analysis_job_id"])
     if not ai_job:
-        raise ValueError("AI analysis job not found.")
+        raise ValueError("智能分析任务不存在。")
 
     ai_job.status = "processing"
     db.add(ai_job)
@@ -293,7 +350,142 @@ def handle_generate_ai_summary(db: Session, job: JobQueue) -> dict:
         resource_id=ai_job.id,
         details={"target_type": ai_job.target_type, "target_id": ai_job.target_id},
     )
+    _create_notification(
+        db,
+        title="智能草稿待复核",
+        message=f"{ai_job.analysis_type} 已生成草稿，请进入平台管理进行人工确认或驳回。",
+        level="info",
+        resource_type="ai_analysis_job",
+        resource_id=ai_job.id,
+    )
     return {"job_type": job.job_type, "ai_analysis_job_id": ai_job.id, "status": ai_job.status}
+
+
+def handle_run_scheduled_task(db: Session, job: JobQueue) -> dict:
+    task = db.get(ScheduledTask, job.payload["scheduled_task_id"])
+    if not task:
+        raise ValueError("Scheduled task not found.")
+    if not task.enabled:
+        task.last_message = "周期任务已停用，跳过执行。"
+        db.add(task)
+        return {"job_type": job.job_type, "scheduled_task_id": job.payload["scheduled_task_id"], "status": "skipped"}
+
+    now = datetime.now(UTC)
+    payload = task.payload or {}
+    result: dict[str, object]
+
+    if task.task_type == "base_data_sync":
+        collection = collect_base_data(payload)
+        imported_count = 0
+        for item in collection.records:
+            ledger_item = LedgerItem(
+                catalog_type=item.catalog_type,
+                name=item.name,
+                status=item.status,
+                source=item.source,
+                version=item.version,
+                owner=item.owner,
+                content=item.content,
+                imported_by_id=task.created_by_id,
+            )
+            db.add(ledger_item)
+            imported_count += 1
+        collection_result = {
+            "collector": collection.collector_name,
+            "imported_count": imported_count,
+            "rejected_count": len(collection.errors),
+            "errors": [error.__dict__ for error in collection.errors],
+            "message": collection.message,
+            "run_at": now.isoformat(),
+        }
+        task.payload = {**payload, "last_collection_result": collection_result}
+        result = {"status": "completed", **collection_result}
+
+    elif task.task_type == "periodic_inspection":
+        rule_set_id = payload.get("rule_set_id")
+        asset_scope = payload.get("asset_scope") or []
+        if not rule_set_id or not asset_scope:
+            raise ValueError("Periodic inspection task requires rule_set_id and asset_scope.")
+        assignments = []
+        for asset_id in asset_scope:
+            asset = db.get(Asset, asset_id)
+            if asset:
+                assignments.append(
+                    {
+                        "asset_id": asset.id,
+                        "asset_name": asset.name,
+                        "asset_type": asset.asset_type,
+                        "owner": asset.owner,
+                    }
+                )
+        owners = sorted({assignment["owner"] for assignment in assignments})
+        inspection = InspectionRun(
+            name=f"{payload.get('name_prefix') or task.name}-{now.strftime('%Y%m%d%H%M')}",
+            trigger_type="scheduled",
+            rule_set_id=rule_set_id,
+            requested_by_id=task.created_by_id or payload.get("requested_by_id") or "system",
+            status="queued",
+            asset_scope=asset_scope,
+            last_message=f"由周期任务自动生成。责任人：{', '.join(owners) if owners else '未匹配'}",
+        )
+        db.add(inspection)
+        db.flush()
+        enqueue_job(
+            db,
+            job_type="run_inspection",
+            payload={
+                "inspection_run_id": inspection.id,
+                "rule_set_id": rule_set_id,
+                "asset_ids": asset_scope,
+                "assignments": assignments,
+            },
+        )
+        result = {"status": "queued", "inspection_run_id": inspection.id, "assignments": assignments}
+
+    else:
+        raise ValueError(f"Unsupported scheduled task type: {task.task_type}")
+
+    task.last_run_at = now
+    task.next_run_at = now + timedelta(minutes=max(task.interval_minutes, 1))
+    task.last_message = str(result.get("message") or f"最近执行结果：{result['status']}")
+    db.add(task)
+    _record_system_audit(
+        db,
+        action="scheduled_task.executed",
+        resource_type="scheduled_task",
+        resource_id=task.id,
+        details=result,
+    )
+    _create_notification(
+        db,
+        title="周期任务已执行",
+        message=f"{task.name} 已执行，结果：{result['status']}。",
+        level="info",
+        resource_type="scheduled_task",
+        resource_id=task.id,
+    )
+    return {"job_type": job.job_type, "scheduled_task_id": task.id, **result}
+
+
+def enqueue_due_scheduled_tasks(db: Session) -> list[str]:
+    now = datetime.now(UTC)
+    tasks = (
+        db.execute(
+            select(ScheduledTask)
+            .where(ScheduledTask.enabled.is_(True), ScheduledTask.next_run_at <= now)
+            .order_by(ScheduledTask.next_run_at.asc())
+        )
+        .scalars()
+        .all()
+    )
+    job_ids: list[str] = []
+    for task in tasks:
+        job = enqueue_job(db, job_type="run_scheduled_task", payload={"scheduled_task_id": task.id})
+        task.next_run_at = now + timedelta(minutes=max(task.interval_minutes, 1))
+        task.last_message = "已进入执行队列。"
+        db.add(task)
+        job_ids.append(job.id)
+    return job_ids
 
 
 def _queue_ai_summary(db: Session, *, target_type: str, target_id: str, analysis_type: str) -> AiAnalysisJob:
@@ -342,5 +534,26 @@ def _record_system_audit(
             resource_type=resource_type,
             resource_id=resource_id,
             details=details,
+        )
+    )
+
+
+def _create_notification(
+    db: Session,
+    *,
+    title: str,
+    message: str,
+    level: str,
+    resource_type: str,
+    resource_id: str,
+) -> None:
+    db.add(
+        Notification(
+            title=title,
+            message=message,
+            level=level,
+            status="unread",
+            resource_type=resource_type,
+            resource_id=resource_id,
         )
     )

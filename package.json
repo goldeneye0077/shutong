@@ -7,7 +7,24 @@
     "build:frontend": "pnpm --dir apps/frontend build",
     "lint:frontend": "pnpm --dir apps/frontend lint",
     "test:frontend": "pnpm --dir apps/frontend test",
-    "contracts:sync": "echo \"Backend OpenAPI is the source of truth. Generate contracts into packages/api-contracts during implementation.\""
+    "test:mock:e2e": "playwright test --config=tests/mock-e2e/playwright.config.ts",
+    "test:mock:e2e:compose": "node tests/mock-e2e/run-compose.mjs",
+    "test:performance": "node tests/performance/run-acceptance.mjs",
+    "test:usability": "playwright test --config=tests/usability/playwright.config.ts",
+    "test:acceptance": "pnpm deploy:check && pnpm test:performance && pnpm test:usability && pnpm bundle:report",
+    "test:regression": "node infra/scripts/run-regression.mjs",
+    "deploy:check": "node infra/scripts/check-deployment.mjs",
+    "test:deployment": "pnpm deploy:check",
+    "bundle:report": "node infra/scripts/check-bundle-size.mjs",
+    "release:check": "node infra/scripts/check-release-candidate.mjs",
+    "demo:reset": "node infra/scripts/reset-demo-data.mjs --force --seed",
+    "seed:demo": "node infra/scripts/seed-demo-data.mjs",
+    "contracts:sync": "python infra/scripts/sync-api-contracts.py",
+    "contracts:check": "python infra/scripts/check-api-contracts.py",
+    "migrations:check": "python infra/scripts/check-migrations.py"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^22.19.17"
   }
 }
-

@@ -3,6 +3,7 @@ node_modules/
 dist/
 build/
 .vite/
+*.tsbuildinfo
 output/
 tmp/
 .pytest_cache/
@@ -11,6 +12,12 @@ __pycache__/
 .ruff_cache/
 .coverage
 coverage.xml
+tests/mock-e2e/.playwright-report/
+tests/mock-e2e/.test-results/
+tests/mock-e2e/tests/
+tests/usability/.playwright-report/
+tests/usability/.test-results/
+tests/performance/.last-result.json
 *.pyc
 *.pyo
 *.pyd
@@ -23,6 +30,9 @@ storage/exports/*
 !storage/uploads/.gitkeep
 !storage/exports/.gitkeep
 附件*.zip
+logo*.jpg
+logo*.jfif
+移动logo.png
 task_plan.md
 findings.md
 progress.md

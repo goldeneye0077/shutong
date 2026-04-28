@@ -5,7 +5,7 @@ import logging
 
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.jobs.handlers import dispatch_job, mark_target_failed
+from app.jobs.handlers import dispatch_job, enqueue_due_scheduled_tasks, mark_target_failed
 from app.jobs.service import claim_next_job, mark_job_completed, mark_job_failed
 
 logger = logging.getLogger(__name__)
@@ -38,5 +38,8 @@ class WorkerRunner:
     async def loop_forever(self) -> None:
         settings = get_settings()
         while True:
+            with SessionLocal() as db:
+                enqueue_due_scheduled_tasks(db)
+                db.commit()
             await self.run_once()
             await asyncio.sleep(settings.poll_interval_seconds)

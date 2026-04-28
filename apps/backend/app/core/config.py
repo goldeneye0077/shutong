@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    app_name: str = Field(default="Core Network Compliance Backend", validation_alias="BACKEND_APP_NAME")
+    app_name: str = Field(default="核心网配置合规后端", validation_alias="BACKEND_APP_NAME")
     database_url: str = Field(default="sqlite+pysqlite:///./backend.db", validation_alias="DATABASE_URL")
     secret_key: str = Field(default="change-me", validation_alias="BACKEND_SECRET_KEY")
     access_token_expire_minutes: int = Field(default=480, validation_alias="BACKEND_ACCESS_TOKEN_EXPIRE_MINUTES")

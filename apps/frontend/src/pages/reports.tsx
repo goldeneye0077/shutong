@@ -1,17 +1,19 @@
 import React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Button from "antd/es/button";
-import Col from "antd/es/col";
-import Form from "antd/es/form";
-import message from "antd/es/message";
-import Modal from "antd/es/modal";
-import Row from "antd/es/row";
-import Select from "antd/es/select";
-import Space from "antd/es/space";
-import Table from "antd/es/table";
-import Tag from "antd/es/tag";
-import Typography from "antd/es/typography";
-import type { ColumnsType } from "antd/es/table";
+import {
+  Button,
+  Form,
+  Grid,
+  Input,
+  Message,
+  Modal,
+  Select,
+  Space,
+  Table,
+  Tag,
+  Typography,
+} from "@arco-design/web-react";
+import type { TableColumnProps } from "@arco-design/web-react";
 import { useAuth } from "../app/auth";
 import { getActiveRefetchInterval } from "../app/polling";
 import {
@@ -29,8 +31,15 @@ import {
   translateArtifactType,
   translateReportType,
 } from "../app/ui";
-import { createReport, downloadReportArtifact, listReportAiSummaries, listReportArtifacts, listReports } from "../services/api";
-import type { ReportArtifact, ReportJob } from "../types/api";
+import {
+  createReport,
+  downloadReportArtifact,
+  listReportAiSummaries,
+  listReportArtifacts,
+  listReports,
+  listReportTemplates,
+} from "../services/api";
+import type { ReportArtifact, ReportJob, ReportTemplate } from "../types/api";
 import type { ThemeMode } from "../theme/theme";
 
 function selectedRowStyle(selected: boolean): React.CSSProperties | undefined {
@@ -41,11 +50,36 @@ function selectedRowStyle(selected: boolean): React.CSSProperties | undefined {
   return { cursor: "pointer", background: "var(--shell-row-hover)" };
 }
 
+const { Row, Col } = Grid;
+const TextArea = Input.TextArea;
+
+interface ReportFormValues {
+  report_type: string;
+  template_id?: string;
+  parameters: string;
+}
+
+function parseJsonObject(value: string, fallback: Record<string, unknown> = {}) {
+  if (!value.trim()) {
+    return fallback;
+  }
+  const parsed = JSON.parse(value) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("请输入 JSON 对象");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function getArtifactDisplayName(record: ReportArtifact) {
+  const label = record.artifact_metadata.artifact_label;
+  return typeof label === "string" && label ? label : translateArtifactType(record.artifact_type);
+}
+
 export function ReportsPage({ mode }: { mode: ThemeMode }) {
   const { accessToken } = useAuth();
   const queryClient = useQueryClient();
-  const [reportForm] = Form.useForm<{ report_type: string }>();
-  const [messageApi, contextHolder] = message.useMessage();
+  const [reportForm] = Form.useForm<ReportFormValues>();
+  const messageApi = Message;
   const [selectedReportId, setSelectedReportId] = React.useState<string | null>(null);
   const [isReportModalOpen, setIsReportModalOpen] = React.useState(false);
 
@@ -78,9 +112,19 @@ export function ReportsPage({ mode }: { mode: ThemeMode }) {
     enabled: Boolean(accessToken && selectedReportId),
     refetchInterval: getActiveRefetchInterval([selectedReportStatus]),
   });
+  const templatesQuery = useQuery({
+    queryKey: ["report-templates", accessToken, "reports-page"],
+    queryFn: () => listReportTemplates(accessToken!),
+    enabled: Boolean(accessToken),
+  });
 
   const createReportMutation = useMutation({
-    mutationFn: (reportType: string) => createReport(accessToken!, { report_type: reportType }),
+    mutationFn: (values: ReportFormValues) =>
+      createReport(accessToken!, {
+        report_type: values.report_type,
+        template_id: values.template_id || null,
+        parameters: parseJsonObject(values.parameters, {}),
+      }),
     onSuccess: async (report) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["reports"] }),
@@ -97,14 +141,14 @@ export function ReportsPage({ mode }: { mode: ThemeMode }) {
     },
   });
 
-  const reportColumns: ColumnsType<ReportJob> = [
+  const reportColumns: TableColumnProps<ReportJob>[] = [
     { title: "报告类型", dataIndex: "report_type", key: "report_type", render: translateReportType },
     { title: "状态", key: "status", render: (_, record) => <StatusTag value={record.status} /> },
     { title: "完成时间", dataIndex: "completed_at", key: "completed_at", render: formatDateTime },
   ];
 
-  const artifactColumns: ColumnsType<ReportArtifact> = [
-    { title: "产物类型", dataIndex: "artifact_type", key: "artifact_type", render: translateArtifactType },
+  const artifactColumns: TableColumnProps<ReportArtifact>[] = [
+    { title: "产物", key: "artifact_type", render: (_, record) => getArtifactDisplayName(record) },
     {
       title: "服务端路径",
       dataIndex: "file_path",
@@ -139,18 +183,17 @@ export function ReportsPage({ mode }: { mode: ThemeMode }) {
 
   const reportItems = reportsQuery.data ?? [];
   const artifactItems = artifactsQuery.data ?? [];
+  const activeTemplates = (templatesQuery.data ?? []).filter((item: ReportTemplate) => item.status === "active");
   const selectedReport = reportItems.find((item) => item.id === selectedReportId) ?? null;
   const activeReports = reportItems.filter((item) => item.status === "queued" || item.status === "processing").length;
 
   return (
     <Space direction="vertical" size="large" style={{ width: "100%" }}>
-      {contextHolder}
-
       <section style={panelStyle(mode)}>
         <PageHeader
-          eyebrow="Reports"
+          eyebrow="报告中心"
           title="报告中心"
-          description="把报告发起、产物下载和 AI 草稿归纳集中到一个面板里，保持一眼就能判断任务是否完成、产物是否可用。"
+          description="发起报告、查看产物、下载文件和复核智能草稿。"
           actions={
             <Space size={[8, 8]} wrap>
               {selectedReport ? <Tag color="blue">{translateReportType(selectedReport.report_type)}</Tag> : null}
@@ -176,7 +219,7 @@ export function ReportsPage({ mode }: { mode: ThemeMode }) {
               hint: "当前选中报告的可下载产物数",
             },
             {
-              label: "AI 草稿",
+              label: "智能草稿",
               value: aiQuery.data?.length ?? 0,
               hint: "待人工复核的摘要草稿",
             },
@@ -199,7 +242,7 @@ export function ReportsPage({ mode }: { mode: ThemeMode }) {
         />
         <Row gutter={[24, 24]}>
           <Col xs={24} xl={15}>
-            <SectionTitle title="报告任务" subtitle="选择一个任务后，右侧会同步展示当前报告的产物与草稿摘要。" />
+            <SectionTitle title="报告任务" subtitle="选择任务后查看产物和草稿摘要。" />
             {reportsQuery.isLoading ? (
               <LoadingBlock label="正在加载报告任务" />
             ) : reportsQuery.error ? (
@@ -208,7 +251,7 @@ export function ReportsPage({ mode }: { mode: ThemeMode }) {
               <Table
                 rowKey="id"
                 columns={reportColumns}
-                dataSource={reportItems}
+                data={reportItems}
                 pagination={false}
                 size="small"
                 onRow={(record) => ({
@@ -219,7 +262,7 @@ export function ReportsPage({ mode }: { mode: ThemeMode }) {
             )}
           </Col>
           <Col xs={24} xl={9}>
-            <SectionTitle title="当前任务摘要" subtitle="把当前选中报告的关键状态压缩到一列里，便于判断是否可对外使用。" />
+            <SectionTitle title="当前任务摘要" subtitle="快速判断任务状态和产物可用性。" />
             <KeyValueList
               items={[
                 { label: "报告类型", value: translateReportType(selectedReport?.report_type) },
@@ -235,14 +278,14 @@ export function ReportsPage({ mode }: { mode: ThemeMode }) {
       <Row gutter={[24, 24]}>
         <Col xs={24} xl={15}>
           <section style={panelStyle(mode)}>
-            <SectionTitle title="报告产物" subtitle="产物由 data-service 生成，文件下载统一经过 backend 授权与审计。" />
+            <SectionTitle title="报告产物" subtitle="下载由后端授权并记录审计。" />
             {artifactsQuery.isLoading ? (
               <LoadingBlock label="正在加载报告产物" />
             ) : artifactsQuery.error ? (
               <QueryErrorNotice error={artifactsQuery.error} />
             ) : (
-              <Space direction="vertical" size="middle" style={{ width: "100%" }}>
-                <Table rowKey="id" columns={artifactColumns} dataSource={artifactItems} pagination={false} size="small" />
+              <Space direction="vertical" size="medium" style={{ width: "100%" }}>
+                <Table rowKey="id" columns={artifactColumns} data={artifactItems} pagination={false} size="small" />
                 {artifactItems[0] ? <JsonBlock value={artifactItems[0].artifact_metadata} /> : null}
               </Space>
             )}
@@ -250,9 +293,9 @@ export function ReportsPage({ mode }: { mode: ThemeMode }) {
         </Col>
         <Col xs={24} xl={9}>
           <section style={panelStyle(mode)}>
-            <SectionTitle title="AI 报告草稿" subtitle="即使报告已经完成，AI 摘要仍保持人工复核前置，不直接当作正式结论。" />
+            <SectionTitle title="智能报告草稿" subtitle="辅助摘要需人工确认后使用。" />
             {aiQuery.isLoading ? (
-              <LoadingBlock label="正在加载 AI 草稿" />
+              <LoadingBlock label="正在加载智能草稿" />
             ) : aiQuery.error ? (
               <QueryErrorNotice error={aiQuery.error} />
             ) : (
@@ -263,7 +306,7 @@ export function ReportsPage({ mode }: { mode: ThemeMode }) {
       </Row>
 
       <Modal
-        open={isReportModalOpen}
+        visible={isReportModalOpen}
         title="生成报告"
         okText="加入队列"
         confirmLoading={createReportMutation.isPending}
@@ -278,19 +321,41 @@ export function ReportsPage({ mode }: { mode: ThemeMode }) {
         <Form
           form={reportForm}
           layout="vertical"
-          initialValues={{ report_type: "inspection_summary" }}
-          onFinish={(values) => {
-            createReportMutation.mutate(values.report_type);
+          initialValues={{
+            report_type: "inspection_summary",
+            parameters: JSON.stringify(
+              { finding_list_limit: 100, include_closed_findings: true, package_include_evidence_manifest: true },
+              null,
+              2,
+            ),
+          }}
+          onSubmit={(values) => {
+            createReportMutation.mutate(values);
           }}
         >
-          <Form.Item name="report_type" label="报告类型" rules={[{ required: true, message: "请选择报告类型" }]}>
+          <Form.Item field="report_type" label="报告类型" rules={[{ required: true, message: "请选择报告类型" }]}>
             <Select
               options={[
                 { label: "巡检摘要", value: "inspection_summary" },
                 { label: "问题摘要", value: "finding_digest" },
                 { label: "审计快照", value: "audit_snapshot" },
+                { label: "迎检资料包", value: "inspection_package" },
               ]}
             />
+          </Form.Item>
+          <Form.Item field="template_id" label="报告模板">
+            <Select
+              allowClear
+              loading={templatesQuery.isLoading}
+              placeholder="不选则使用该类型最新启用模板"
+              options={activeTemplates.map((template) => ({
+                label: `${translateReportType(template.template_type)} / ${template.name} / ${template.version}`,
+                value: template.id,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item field="parameters" label="生成参数 JSON" rules={[{ required: true, message: "请输入生成参数 JSON" }]}>
+            <TextArea autoSize={{ minRows: 5, maxRows: 9 }} />
           </Form.Item>
         </Form>
       </Modal>

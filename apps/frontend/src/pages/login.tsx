@@ -37,54 +37,49 @@ export function LoginPage({ mode }: { mode: ThemeMode }) {
       <div className="shell-login-grid">
         <section className="shell-panel shell-login-hero">
           <div className="shell-login-copy">
-            <span className="shell-overline">Tech Ops Entry</span>
+            <span className="shell-overline">核心网配置合规</span>
             <h1>
-              让合规态势
+              核心网配置安全
               <br />
-              像控制台一样清晰。
+              值守控制台
             </h1>
-            <p>
-              这套前端不再走演示页路线，而是按真实值守控制台重做。视觉上用深海色底和冷青高亮建立科技感，信息上仍坚持少噪声、高可读、强操作的运维逻辑。
-            </p>
-            <p>
-              前端只接入 backend 的统一 API，解析、规则执行、报告生成和 AI 草稿都留在服务侧完成，避免把执行复杂度泄露到操作面。
-            </p>
+            <p>面向日常巡检、风险闭环和报告留痕，前端只承载交互与状态，不越过后台执行边界。</p>
           </div>
 
           <div className="shell-login-board">
             <div className="shell-login-board-card">
-              <span>解析吞吐</span>
-              <strong>96.8%</strong>
-              <p>过去 24 小时配置解析成功率，作为值守入口的首个健康信号。</p>
+              <span>入口</span>
+              <strong>前端</strong>
+              <p>页面、主题、上传入口和任务状态轮询。</p>
             </div>
             <div className="shell-login-board-card">
-              <span>巡检队列</span>
-              <strong>12</strong>
-              <p>当前仍处于排队或执行中的巡检任务，用来提示控制台负载。</p>
+              <span>编排</span>
+              <strong>后端</strong>
+              <p>认证、角色权限、资源接口、审计和任务元数据。</p>
             </div>
             <div className="shell-login-board-card">
-              <span>复核约束</span>
-              <strong>{mode === "dark" ? "Dark Tech" : "Light Lab"}</strong>
-              <p>AI 输出只作为草稿，不会直接写成最终结论，始终保留人工确认环节。</p>
+              <span>执行</span>
+              <strong>数据服务</strong>
+              <p>解析、规则执行、报告产物和智能摘要草稿。</p>
             </div>
           </div>
 
           <div className="shell-login-terminal">
             <div className="shell-login-terminal-line">
-              <span>northbound.bus</span>
-              <strong>online</strong>
+              <span>主题模式</span>
+              <strong>{mode === "dark" ? "深色驾驶舱" : "浅色驾驶舱"}</strong>
             </div>
             <div className="shell-login-terminal-line">
-              <span>worker.pipeline</span>
-              <strong>parse / rules / report</strong>
+              <span>公共接口</span>
+              <strong>/api/v1</strong>
             </div>
             <div className="shell-login-terminal-line">
-              <span>execution.model</span>
-              <strong>frontend / backend / data-service</strong>
+              <span>任务队列</span>
+              <strong>PostgreSQL 任务队列</strong>
             </div>
             <div className="shell-login-terminal-line">
-              <span>review.policy</span>
-              <strong>AI draft requires approval</strong>
+              <span>智能分析策略</span>
+              <strong>人工复核后采用</strong>
             </div>
           </div>
         </section>
@@ -92,11 +87,11 @@ export function LoginPage({ mode }: { mode: ThemeMode }) {
         <section className="shell-panel shell-login-panel">
           <div className="shell-login-panel-head">
             <span className="shell-overline" style={{ color: "var(--shell-accent)" }}>
-              登录入口
+              登录
             </span>
-            <h2>进入核心网合规控制台</h2>
+            <h2>进入平台</h2>
             <p>
-              默认初始化管理员账号为 <code>admin / admin123</code>。登录页保持轻量，真正较重的工作台资源会在认证通过后懒加载。
+              初始账号 <code>admin / admin123</code>。登录后进入值守总览。
             </p>
           </div>
 
@@ -129,12 +124,10 @@ export function LoginPage({ mode }: { mode: ThemeMode }) {
             </div>
 
             <button className="shell-button" type="submit" disabled={submitting}>
-              {submitting ? "正在登录..." : "进入工作台"}
+              {submitting ? "正在登录..." : "进入值守台"}
             </button>
 
-            <p className="shell-help">
-              登录完成后，你会直接进入科技风值守控制台。所有写操作都仍然走现有接口，不改变三域边界。
-            </p>
+            <p className="shell-help">写操作会通过后端创建任务，再由数据服务异步处理。</p>
           </form>
         </section>
       </div>
